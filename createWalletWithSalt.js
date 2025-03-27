@@ -48,6 +48,55 @@ function createWalletWithSalt(salt, options = {}) {
 }
 
 /**
+ * Signs a message with the wallet created from a salt
+ * @param {string} salt - The salt used to create the wallet
+ * @param {string} message - The message to sign
+ * @param {Object} options - Additional options
+ * @returns {Object} The signature info including the message, signature, and recovery information
+ */
+async function signMessage(salt, message, options = {}) {
+  if (!salt || !message) {
+    throw new Error('Both salt and message are required');
+  }
+
+  try {
+    // Recreate the wallet from the salt
+    const walletInfo = createWalletWithSalt(salt, options);
+    const wallet = new ethers.Wallet(walletInfo.privateKey);
+    
+    // Sign the message
+    const signature = await wallet.signMessage(message);
+    
+    // Get the signing address from the signature to verify
+    const verifiedAddress = ethers.utils.verifyMessage(message, signature);
+    
+    return {
+      message: message,
+      signature: signature,
+      address: wallet.address,
+      verified: verifiedAddress === wallet.address
+    };
+  } catch (error) {
+    throw new Error(`Failed to sign message: ${error.message}`);
+  }
+}
+
+/**
+ * Verifies a message signature
+ * @param {string} message - The original message
+ * @param {string} signature - The signature to verify
+ * @returns {string} The address that signed the message
+ */
+function verifySignature(message, signature) {
+  try {
+    const signerAddress = ethers.utils.verifyMessage(message, signature);
+    return signerAddress;
+  } catch (error) {
+    throw new Error(`Failed to verify signature: ${error.message}`);
+  }
+}
+
+/**
  * Runs the interactive CLI for wallet creation
  */
 async function runInteractiveCLI() {
@@ -83,6 +132,26 @@ async function runInteractiveCLI() {
     console.log('\nIMPORTANT: Keep your private key, mnemonic, and salt secure!');
     console.log('Anyone with access to your private key or mnemonic can access your funds.');
     
+    // Ask if the user wants to sign a message
+    const signChoice = await question('\nDo you want to sign a message with this wallet? (y/N): ');
+    
+    if (signChoice.toLowerCase() === 'y') {
+      const message = await question('Enter the message to sign: ');
+      if (message) {
+        const signResult = await signMessage(userSalt, message, { use24Words });
+        
+        console.log('\n=== Message Signature ===');
+        console.log('Message:', signResult.message);
+        console.log('Signature:', signResult.signature);
+        console.log('Signing Address:', signResult.address);
+        console.log('Signature Valid:', signResult.verified);
+        
+        console.log('\nTo verify this signature elsewhere, use:');
+        console.log('Original message:', message);
+        console.log('Signature:', signResult.signature);
+      }
+    }
+    
     // Verify reproducibility
     console.log('\n=== Verification ===');
     console.log('Creating the same wallet again with your salt...');
@@ -103,19 +172,43 @@ if (require.main === module) {
     const salt = process.argv[2];
     const use24Words = process.argv.includes('--24words');
     
-    try {
-      const wallet = createWalletWithSalt(salt, { use24Words });
+    // Check if we're signing a message
+    const msgIndex = process.argv.indexOf('--sign');
+    if (msgIndex !== -1 && process.argv.length > msgIndex + 1) {
+      const message = process.argv[msgIndex + 1];
       
-      console.log('Wallet created with salt:');
-      console.log('Address:', wallet.address);
-      console.log('Private Key:', wallet.privateKey);
-      console.log(`Mnemonic (${wallet.wordCount} words):`, wallet.mnemonic);
-      
-      // Verify reproducibility
-      const sameWallet = createWalletWithSalt(salt, { use24Words });
-      console.log('\nSame wallet generated:', wallet.address === sameWallet.address);
-    } catch (error) {
-      console.error('Error creating wallet:', error.message);
+      try {
+        const wallet = createWalletWithSalt(salt, { use24Words });
+        console.log('Wallet created with salt:');
+        console.log('Address:', wallet.address);
+        console.log('Private Key:', wallet.privateKey);
+        
+        // Sign the message
+        signMessage(salt, message, { use24Words }).then(signResult => {
+          console.log('\nMessage successfully signed:');
+          console.log('Message:', signResult.message);
+          console.log('Signature:', signResult.signature);
+          console.log('Signing Address:', signResult.address);
+          console.log('Signature Valid:', signResult.verified);
+        });
+      } catch (error) {
+        console.error('Error:', error.message);
+      }
+    } else {
+      try {
+        const wallet = createWalletWithSalt(salt, { use24Words });
+        
+        console.log('Wallet created with salt:');
+        console.log('Address:', wallet.address);
+        console.log('Private Key:', wallet.privateKey);
+        console.log(`Mnemonic (${wallet.wordCount} words):`, wallet.mnemonic);
+        
+        // Verify reproducibility
+        const sameWallet = createWalletWithSalt(salt, { use24Words });
+        console.log('\nSame wallet generated:', wallet.address === sameWallet.address);
+      } catch (error) {
+        console.error('Error creating wallet:', error.message);
+      }
     }
   } else {
     // No arguments, run interactive CLI
@@ -123,5 +216,5 @@ if (require.main === module) {
   }
 }
 
-// Export the function for use in other scripts
-module.exports = { createWalletWithSalt }; 
+// Export the functions for use in other scripts
+module.exports = { createWalletWithSalt, signMessage, verifySignature }; 
